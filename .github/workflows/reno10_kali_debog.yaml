@@ -1,0 +1,323 @@
+name: Build KernelSU-Next Docker Kernel
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+    - cron: '0 12 * * 5'
+    - cron: '0 12 * * 3'
+
+jobs:
+  build:
+    name: Compile Kernel
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Configure Fast APT Mirror
+        uses: vegardit/fast-apt-mirror.sh@v1
+
+      - name: Make Build Environment
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kmod cpio binutils cmake binutils-aarch64-linux-gnu git wget pahole automake flex lzop bison gperf build-essential zip curl zlib1g-dev libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip dwarves device-tree-compiler python3 ccache git-lfs gnupg imagemagick libelf-dev libncurses5-dev libsdl1.2-dev gpart fuse2fs e2fsck-static icu-doc rsync adb fastboot libstdc++6 python-is-python3 gcc-aarch64-linux-gnu
+          mkdir -p kernel
+
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v6
+        with:
+          repository: miaizhe/Kernel_oppo_sm7325_Reno10
+          path: kernel/msm-5.4
+          fetch-depth: 1
+
+      - name: Checkout Modules Source
+        uses: actions/checkout@v6
+        with:
+          repository: oppo-source/android_kernel_modules_and_devicetree_oppo_sm7325
+          path: temp_modules
+          ref: oppo/sm7325_v_15.0.0_reno10
+
+      - name: Prepare Compiler
+        run: |
+          mkdir -p compiler
+          cd compiler
+          curl -fL "https://github.com/Rancemxn/android_kernel_oppo_sm7325/releases/download/BuildTool/linux-x86-refs_heads_llvm-r383902b-clang-r383902.tar.gz" -o clang-r383902.tar.gz --connect-timeout 30 --retry 5 --retry-delay 5
+          mkdir -p clang-bin
+          tar -xzf clang-r383902.tar.gz -C clang-bin
+          rm clang-r383902.tar.gz
+
+      - name: Handle Dependencies
+        run: |
+          mv temp_modules/vendor ./vendor
+          mv temp_modules/device ./device
+          rm -rf temp_modules
+
+      - name: Set Release Info & Custom Version
+        run: |
+          BUILD_DATE=$(date +%Y%m%d)
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+
+      - name: rekernel
+        run: |
+          cd kernel/msm-5.4
+          curl -LSs "https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/refs/heads/mainline/Patches/Rekernel/rekernel_patches.sh" -o rekernel_patches.sh
+          chmod +x rekernel_patches.sh
+          bash rekernel_patches.sh
+          mkdir -p drivers/rekernel
+          curl https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/refs/heads/mainline/Patches/Rekernel/rekernel_extra.patch -o rekernel_extra.patch
+          patch -p1 < rekernel_extra.patch || true
+
+      - name: Compile Kernel
+        run: |
+          export PATH="$(pwd)/compiler/clang-bin/bin:$PATH"
+          export CROSS_COMPILE="aarch64-linux-android-"
+          export CROSS_COMPILE_ARM32="arm-linux-androideabi-"
+          export CLANG_TRIPLE="aarch64-linux-gnu-"
+          export CLANG_PATH="$(pwd)/compiler/clang-bin/bin"
+          export ARCH="arm64"
+          export SUBARCH="arm64"
+
+          cd kernel/msm-5.4
+
+          echo "添加docker补丁中"
+          rm fs/overlayfs/util.c
+          curl -LSs "https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/util.c" -o fs/overlayfs/util.c
+          rm kernel/module.c
+          curl -LSs "https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/module.c" -o kernel/module.c
+          rm arch/arm64/configs/Reno10-Docker_defconfig
+          curl -LSs "https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/Reno10-Docker_defconfig" -o arch/arm64/configs/Reno10-Docker_defconfig
+          rm include/linux/sched/user.h
+          curl -LSs https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/below-kernel-6.12/001.GKI-below-6.12-fix_sysvipc_kabi_3_4_5.patch -o 001.GKI-below-6.12-fix_sysvipc_kabi_3_4_5.patch
+          curl -LSs https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/user.h -o include/linux/sched/user.h
+          patch -p1 < 001.GKI-below-6.12-fix_sysvipc_kabi_3_4_5.patch
+          echo "添加docker补丁完成"
+
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
+          curl -LSs "https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/syscall_hook_patches.sh" -o syscall_hook_patches.sh
+          chmod +x syscall_hook_patches.sh
+          bash syscall_hook_patches.sh
+          sed -i '/ksu_handle_devpts/d' drivers/tty/pty.c
+          sed -i 's/obj-$(CONFIG_KPROBES)/obj-y/g' kernel/Makefile
+
+          echo "正在用命令重构并清空报错的 selinux_hide.c..."
+          cat << 'EOF' > drivers/kernelsu/feature/selinux_hide.c
+          #include <linux/types.h>
+          #include <linux/kernel.h>
+          bool ksu_selinux_hide_status_get(void) { return false; }
+          void ksu_selinux_hide_status_set(bool enable) { }
+          int ksu_selinux_hide_init(void) { return 0; }
+          void ksu_selinux_hide_exit(void) { }
+          bool ksu_selinux_hide_enable(void) { return true; }
+          EOF
+
+          # 1. 生成默认配置
+          make O=out CC="clang" LLVM=1 Reno10-Docker_defconfig
+
+          # 2. 注入 Kali NetHunter 所需功能
+          echo "正在注入 Kali NetHunter 所需功能..."
+          # --- Chroot 支持 ---
+          ./scripts/config --file out/.config --enable CONFIG_NAMESPACES
+          ./scripts/config --file out/.config --enable CONFIG_UTS_NS
+          ./scripts/config --file out/.config --enable CONFIG_IPC_NS
+          ./scripts/config --file out/.config --enable CONFIG_PID_NS
+          ./scripts/config --file out/.config --enable CONFIG_NET_NS
+          ./scripts/config --file out/.config --enable CONFIG_DEVPTS_MULTIPLE_INSTANCES
+
+          # --- USB Gadget / HID 攻击支持 (BadUSB) ---
+          ./scripts/config --file out/.config --enable CONFIG_USB_GADGET
+          ./scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS
+          ./scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_F_HID
+          ./scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_F_FS
+
+          # --- WiFi 监听与注入模式支持 ---
+          ./scripts/config --file out/.config --enable CONFIG_CFG80211
+          ./scripts/config --file out/.config --enable CONFIG_MAC80211
+          ./scripts/config --file out/.config --enable CONFIG_MAC80211_MESH
+
+          # --- 文件系统支持 ---
+          ./scripts/config --file out/.config --enable CONFIG_SQUASHFS
+          ./scripts/config --file out/.config --enable CONFIG_SQUASHFS_XATTR
+          ./scripts/config --file out/.config --enable CONFIG_SQUASHFS_ZLIB
+
+          # --- 网络过滤 ---
+          ./scripts/config --file out/.config --enable CONFIG_NETFILTER
+          ./scripts/config --file out/.config --enable CONFIG_NF_NAT
+
+          # 3. 开始原有的 Docker 配置修改
+          echo "正在应用原有的 Docker 相关配置..."
+          ./scripts/config --file out/.config \
+            -d CONFIG_KSU_TRACEPOINT_HOOK \
+            -e CONFIG_KSU_MANUAL_HOOK
+
+          # ==== Enable namespaces for Droidspaces ====
+          ./scripts/config --file out/.config \
+            -e CONFIG_USER_NS \
+            -e CONFIG_PID_NS \
+            -e CONFIG_IPC_NS \
+            -e CONFIG_CHECKPOINT_RESTORE \
+            -e CONFIG_SYSVIPC \
+            -e CONFIG_KPROBES \
+            -e CONFIG_TMPFS_POSIX_ACL \
+            -e CONFIG_TMPFS_XATTR
+
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_PIDS
+          ./scripts/config --file out/.config --enable CONFIG_CGROUP_IO
+          ./scripts/config --file out/.config --enable CONFIG_CPUSETS
+          ./scripts/config --file out/.config --enable CONFIG_MEMCG
+          ./scripts/config --file out/.config --enable CONFIG_DEVTMPFS
+          ./scripts/config --file out/.config --enable CONFIG_DEVTMPFS_MOUNT
+          ./scripts/config --file out/.config --enable CONFIG_OVERLAY_FS
+
+          # --- 补充 NetHunter Full 所需功能 ---
+          # USB 全功能 (ADB/串口/ECM/NCM/RNDIS/DWC3)
+          ./scripts/config --file out/.config --enable CONFIG_USB_ACM
+          ./scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_ACM
+          ./scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_SERIAL
+          ./scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_ECM
+          ./scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_NCM
+          ./scripts/config --file out/.config --enable CONFIG_USB_CONFIGFS_RNDIS
+          ./scripts/config --file out/.config --enable CONFIG_USB_DWC3
+
+          # NAT / 转发
+          ./scripts/config --file out/.config --enable CONFIG_NF_CONNTRACK
+          ./scripts/config --file out/.config --enable CONFIG_NF_CONNTRACK_IPV4
+          ./scripts/config --file out/.config --enable CONFIG_NETFILTER_XTABLES
+          ./scripts/config --file out/.config --enable CONFIG_IP_NF_IPTABLES
+          ./scripts/config --file out/.config --enable CONFIG_IP_NF_FILTER
+          ./scripts/config --file out/.config --enable CONFIG_IP_NF_NAT
+          ./scripts/config --file out/.config --enable CONFIG_IP_NF_TARGET_MASQUERADE
+          ./scripts/config --file out/.config --enable CONFIG_NF_NAT_MASQUERADE
+          # 桥接
+          ./scripts/config --file out/.config --enable CONFIG_BRIDGE
+          ./scripts/config --file out/.config --enable CONFIG_BRIDGE_NETFILTER
+
+
+          # 模块加载
+          ./scripts/config --file out/.config --enable CONFIG_MODULES
+          ./scripts/config --file out/.config --enable CONFIG_MODULE_UNLOAD
+          ./scripts/config --file out/.config --enable CONFIG_FW_LOADER
+
+          # Cgroup 完整
+          ./scripts/config --file out/.config --enable CONFIG_CGROUPS
+
+          # 抓包
+          ./scripts/config --file out/.config --enable CONFIG_PACKET
+
+          # --- 无线框架补充 (WLAN 监听前置) ---
+          ./scripts/config --file out/.config --enable CONFIG_WIRELESS
+          ./scripts/config --file out/.config --enable CONFIG_WIRELESS_EXT
+          ./scripts/config --file out/.config --enable CONFIG_NL80211_TESTMODE
+
+          # --- 路由与 QoS (流量整形/抓包辅助) ---
+          ./scripts/config --file out/.config --enable CONFIG_IP_ADVANCED_ROUTER
+          ./scripts/config --file out/.config --enable CONFIG_NET_SCHED
+
+          # --- IPv6 NAT 全链路 (渗透测试常需 IPv6) ---
+          ./scripts/config --file out/.config --enable CONFIG_IPV6
+          ./scripts/config --file out/.config --enable CONFIG_NF_CONNTRACK_IPV6
+          ./scripts/config --file out/.config --enable CONFIG_NF_NAT_IPV6
+          ./scripts/config --file out/.config --enable CONFIG_IP6_NF_IPTABLES
+          ./scripts/config --file out/.config --enable CONFIG_IP6_NF_FILTER
+          ./scripts/config --file out/.config --enable CONFIG_IP6_NF_NAT
+          ./scripts/config --file out/.config --enable CONFIG_IP6_NF_TARGET_MASQUERADE
+
+          # --- nftables 核心 (Kali 新版默认防火墙/流量控制) ---
+          ./scripts/config --file out/.config --enable CONFIG_NF_TABLES
+          ./scripts/config --file out/.config --enable CONFIG_NF_TABLES_IPV4
+          ./scripts/config --file out/.config --enable CONFIG_NF_TABLES_IPV6
+          ./scripts/config --file out/.config --enable CONFIG_NF_TABLES_INET
+          ./scripts/config --file out/.config --enable CONFIG_NF_TABLES_NETDEV
+          ./scripts/config --file out/.config --enable CONFIG_NFT_CT
+          ./scripts/config --file out/.config --enable CONFIG_NFT_NAT
+          ./scripts/config --file out/.config --enable CONFIG_NFT_MASQ
+          ./scripts/config --file out/.config --enable CONFIG_NFT_REDIR
+          ./scripts/config --file out/.config --enable CONFIG_NFT_COUNTER
+          ./scripts/config --file out/.config --enable CONFIG_NFT_LOG
+          ./scripts/config --file out/.config --enable CONFIG_NFT_LIMIT
+
+          # --- 流量标记 MANGLE / MARK (部分攻击工具依赖) ---
+          ./scripts/config --file out/.config --enable CONFIG_IP_NF_MANGLE
+          ./scripts/config --file out/.config --enable CONFIG_NETFILTER_XT_TARGET_MARK
+
+          # --- 文件系统补充 (挂载 Kali ISO / F2FS) ---
+          ./scripts/config --file out/.config --enable CONFIG_ISO9660_FS
+          ./scripts/config --file out/.config --enable CONFIG_UDF_FS
+          ./scripts/config --file out/.config --enable CONFIG_F2FS_FS
+
+          # 4. 开始编译
+          make O=out CC="clang" LLVM=1 -j$(nproc)
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          sed -i '584s|ui_print " " "Done!";|ui_print " "; ui_print "感谢支持芜夕wuxi内核，刷入完成！"; ui_print "祝你玩的愉快！";|' AnyKernel3/META-INF/com/google/android/update-binary
+          cp kernel/msm-5.4/out/arch/arm64/boot/Image AnyKernel3/
+          mkdir -p AnyKernel3/modules/vendor/lib/modules
+          find kernel/msm-5.4/out/ -name "*.ko" -exec cp {} AnyKernel3/modules/vendor/lib/modules/ \;
+          cd AnyKernel3
+          rm anykernel.sh
+          wget https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/anykernel.sh
+          zip -r9 ../KernelSU-Next-Reno10-Docker-${{ env.BUILD_DATE }}.zip * -x .git* README.md *placeholder
+
+      - name: Pack Boot Image
+        run: |
+          pwd
+          mkdir -p boot_pack
+          cd boot_pack
+          wget https://raw.githubusercontent.com/miaizhe/magiskboot-linux/refs/heads/main/x86_64/magiskboot
+          chmod +x magiskboot
+          curl -fL "https://github.com/miaizhe/twrp_device_oppo_taylor/releases/download/TWRP/twrp-3.7.1_12-0-Reno10.img" -o boot_origin.img
+          ./magiskboot unpack boot_origin.img
+          if [ ! -f "../kernel/msm-5.4/out/arch/arm64/boot/Image" ]; then
+            echo "错误：编译出的 Image 文件不存在，请检查编译步骤！"
+            exit 1
+          fi
+          cp ../kernel/msm-5.4/out/arch/arm64/boot/Image kernel
+          ./magiskboot repack boot_origin.img ../boot-KernelSU-Next-Reno10-Docker-${{ env.BUILD_DATE }}.img
+          pwd
+          cd ..
+          pwd
+
+      - name: Pack WithoutTWRP Boot Image
+        run: |
+          pwd
+          mkdir -p boot_pack
+          cd boot_pack
+          wget https://raw.githubusercontent.com/miaizhe/magiskboot-linux/refs/heads/main/x86_64/magiskboot
+          chmod +x magiskboot
+          curl -fL "https://github.com/miaizhe/Kernel_oppo_sm7325_Reno10/releases/download/boot/boot_a.img" -o boot_origin.img
+          ./magiskboot unpack boot_origin.img
+          if [ ! -f "../kernel/msm-5.4/out/arch/arm64/boot/Image" ]; then
+            echo "错误：编译出的 Image 文件不存在，请检查编译步骤！"
+            exit 1
+          fi
+          cp ../kernel/msm-5.4/out/arch/arm64/boot/Image kernel
+          ./magiskboot repack boot_origin.img ../boot-KernelSU_Next-Reno10-WithoutTWRP-Docker-${{ env.BUILD_DATE }}.img
+          pwd
+          cd ..
+          pwd
+
+      - name: Upload Flashable Kernel
+        uses: actions/upload-artifact@v6
+        with:
+          name: ReSukiSU_Reno10_Docker.img
+          path: |
+            boot-KernelSU-Next-Reno10-Docker-${{ env.BUILD_DATE }}.img
+            boot-KernelSU_Next-Reno10-WithoutTWRP-Docker-${{ env.BUILD_DATE }}.img
+            KernelSU-Next-Reno10-Docker-${{ env.BUILD_DATE }}.zip
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.BUILD_DATE }}
+          name: KernelSU Kernel for Reno10 (${{ env.BUILD_DATE }})
+          body: |
+            - 编译日期: ${{ env.BUILD_DATE }}
+            - 核心版本: 5.4.254
+            - 包含功能: ReSukiSU,KernelSU-Next
+            - 欢迎刷入芜夕wuxi的内核！祝你玩的愉快！
+            - 文件：分为带SuSFS的和不带SukiSU的，zip为ak3包，img文件为打包好的镜像，Docker为带Docker的,test为测试版
+          files: |
+            KernelSU-Next-Reno10-Docker-${{ env.BUILD_DATE }}.zip
+            boot-KernelSU-Next-Reno10-Docker-${{ env.BUILD_DATE }}.img
+            boot-KernelSU_Next-Reno10-WithoutTWRP-Docker-${{ env.BUILD_DATE }}.img
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
