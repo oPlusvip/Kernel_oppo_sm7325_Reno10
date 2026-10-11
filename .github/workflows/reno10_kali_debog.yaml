@@ -111,6 +111,10 @@ jobs:
           # 1. 生成默认配置
           make O=out CC="clang" LLVM=1 Reno10-Docker_defconfig
 
+          # ==== 开启 KVM 虚拟化（验证 EL2 归属）====
+          ./scripts/config --file out/.config --enable CONFIG_VIRTUALIZATION
+          ./scripts/config --file out/.config --enable CONFIG_KVM
+
           # 2. 注入 Kali NetHunter 所需功能
           echo "正在注入 Kali NetHunter 所需功能..."
           # --- Chroot 支持 ---
