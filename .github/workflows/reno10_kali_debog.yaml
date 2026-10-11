@@ -98,14 +98,12 @@ jobs:
           sed -i 's/obj-$(CONFIG_KPROBES)/obj-y/g' kernel/Makefile
 
           echo "正在用命令重构并清空报错的 selinux_hide.c..."
-                    cat << 'EOF' > drivers/kernelsu/feature/selinux_hide.c
+                              cat << 'EOF' > drivers/kernelsu/feature/selinux_hide.c
           #include <linux/types.h>
           #include <linux/kernel.h>
-          bool ksu_selinux_hide_status_get(void) { return false; }
-          void ksu_selinux_hide_status_set(bool enable) { }
-          int ksu_selinux_hide_init(void) { return 0; }
+          void ksu_selinux_hide_init(void) { }
           void ksu_selinux_hide_exit(void) { }
-          bool ksu_selinux_hide_enable(void) { return true; }
+          void ksu_selinux_hide_drop_backup_if_unused(void) { }
           void ksu_selinux_hide_handle_post_fs_data(void) { }
           void ksu_selinux_hide_handle_second_stage(void) { }
           EOF
