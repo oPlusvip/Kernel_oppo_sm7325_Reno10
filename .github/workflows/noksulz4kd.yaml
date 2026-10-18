@@ -96,6 +96,8 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/Makefile" -o lib/lz4kd/Makefile
           curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/lz4kd_encode.c" -o lib/lz4kd/lz4kd_encode.c
           curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/lz4kd_decode.c" -o lib/lz4kd/lz4kd_decode.c
+          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/lz4kd_private.h" -o lib/lz4kd/lz4kd_private.h
+          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/lz4kd_encode_private.h" -o lib/lz4kd/lz4kd_encode_private.h
           curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/include/linux/lz4kd.h" -o include/linux/lz4kd.h
           curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/crypto/lz4kd.c" -o crypto/lz4kd.c
           # 注册到 crypto/Makefile 与 lib/Makefile（已存在则跳过）
