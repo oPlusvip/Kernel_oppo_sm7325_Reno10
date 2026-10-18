@@ -1,3 +1,4 @@
+
 name: Build Reno10 Docker Kernel
 on:
   workflow_dispatch:
@@ -13,6 +14,11 @@ jobs:
     steps:
       - name: Configure Fast APT Mirror
         uses: vegardit/fast-apt-mirror.sh@v1
+
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h
 
       - name: Make Build Environment
         timeout-minutes: 10
