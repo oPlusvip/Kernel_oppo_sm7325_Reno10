@@ -314,7 +314,9 @@ jobs:
           # USB 蓝牙驱动 (兼容外接)
           ./scripts/config --file out/.config --enable CONFIG_BT_HCIBTUSB
 
-          # 4. 开始编译
+          # 4. 自动填充新增 config 的默认值（避免 syncconfig 交互式卡住）
+          make O=out CC="clang" LLVM=1 olddefconfig
+          # 5. 开始编译
           make O=out CC="clang" LLVM=1 -j2
 
       - name: Package with AnyKernel3
