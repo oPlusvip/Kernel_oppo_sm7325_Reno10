@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     name: Compile Kernel
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Configure Fast APT Mirror
         uses: vegardit/fast-apt-mirror.sh@v1
@@ -315,7 +315,7 @@ jobs:
           ./scripts/config --file out/.config --enable CONFIG_BT_HCIBTUSB
 
           # 4. 开始编译
-          make O=out CC="clang" LLVM=1 -j$(nproc)
+          make O=out CC="clang" LLVM=1 -j2
 
       - name: Package with AnyKernel3
         run: |
