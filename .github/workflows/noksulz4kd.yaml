@@ -123,6 +123,9 @@ jobs:
             echo '	tristate' >> lib/Kconfig
           }
 
+          # 移除内核源码里预装的 KernelSU 引用（本工作流不再内置 root，配合 APatch）
+          sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile
+
           # 1. 生成默认配置
           make O=out CC="clang" LLVM=1 Reno10-Docker_defconfig
 
