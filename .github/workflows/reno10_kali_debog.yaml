@@ -110,6 +110,30 @@ jobs:
           # 1. 生成默认配置
           make O=out CC="clang" LLVM=1 Reno10-Docker_defconfig
 
+          # ==== 修复 TWRP 无法解密 data：恢复 Android FBE v2 密钥体系 ====
+          echo "正在恢复 FBE v2 解密所需的内核密钥与加密功能..."
+          ./scripts/config --file out/.config --enable CONFIG_KEYS
+          ./scripts/config --file out/.config --enable CONFIG_KEYS_COMPAT
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_HMAC
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_SHA512
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_CTS
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_AES
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_XTS
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_CBC
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_ECB
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_CTR
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_SHA256
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_SHA1
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_AES_ARM64_CE
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_SHA256_ARM64
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_CRYPTD
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_GCM
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_GHASH
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_ESSIV
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_CCM
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_CMAC
+          ./scripts/config --file out/.config --enable CONFIG_CRYPTO_DRBG
+
           # ==== 开启 KVM 虚拟化（验证 EL2 归属）====
           ./scripts/config --file out/.config --enable CONFIG_VIRTUALIZATION
           ./scripts/config --file out/.config --enable CONFIG_KVM
