@@ -104,6 +104,8 @@ jobs:
           grep -q 'CONFIG_CRYPTO_LZ4KD' crypto/Makefile || echo 'obj-$(CONFIG_CRYPTO_LZ4KD) += lz4kd.o' >> crypto/Makefile
           grep -q 'CONFIG_LZ4KD_COMPRESS' lib/Makefile || echo 'obj-$(CONFIG_LZ4KD_COMPRESS) += lz4kd/' >> lib/Makefile
           grep -q 'CONFIG_LZ4KD_DECOMPRESS' lib/Makefile || echo 'obj-$(CONFIG_LZ4KD_DECOMPRESS) += lz4kd/' >> lib/Makefile
+          # 在 zram 算法列表里注册 lz4kd（直接用 sm8250 的 zcomp.c，含 lz4kd 算法名）
+          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/drivers/block/zram/zcomp.c" -o drivers/block/zram/zcomp.c
           # Kconfig 注册（追加到文件末尾，Kconfig 对平铺 config 顺序不敏感）
           grep -q 'config CRYPTO_LZ4KD' crypto/Kconfig || {
             echo '' >> crypto/Kconfig
