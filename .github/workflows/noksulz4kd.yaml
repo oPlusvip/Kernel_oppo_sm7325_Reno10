@@ -6,6 +6,11 @@ on:
     - cron: '0 12 * * 5'
     - cron: '0 12 * * 3'
 
+# Upload Release 报 "Resource not accessible by integration"，是因为 fork 仓库的
+# GITHUB_TOKEN 默认只读（本仓库 default_workflow_permissions=read），这里显式声明写权限。
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Compile Kernel
@@ -95,42 +100,66 @@ jobs:
           patch -p1 < 001.GKI-below-6.12-fix_sysvipc_kabi_3_4_5.patch
           echo "添加docker补丁完成"
 
-          # ==== 接入 LZ4KD zram 压缩算法（华为 lz4kd，提升 zram 压缩率保后台）====
+          # ==== 接入 LZ4KD（华为）zram 压缩算法 ====
+          # 关键：只往 drivers/block/zram/zcomp.c 的 backends[] 里加一项，绝不要整体覆盖 zcomp.c。
+          # 本内核开了 CONFIG_CONT_PTE_HUGEPAGE_64K_ZRAM，OPPO 的 zcomp.h 声明的是
+          #   struct zcomp *zcomp_create(const char *comp, bool is_thp_comp);
+          # 而 sm8250 那份 zcomp.c 是单参数版本，整体覆盖会直接编译报
+          #   error: conflicting types for 'zcomp_create'
           echo "正在接入 LZ4KD 压缩算法..."
+          LZ4KD_URL="https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master"
           mkdir -p lib/lz4kd
-          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/Makefile" -o lib/lz4kd/Makefile
-          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/lz4kd_encode.c" -o lib/lz4kd/lz4kd_encode.c
-          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/lz4kd_decode.c" -o lib/lz4kd/lz4kd_decode.c
-          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/lz4kd_private.h" -o lib/lz4kd/lz4kd_private.h
-          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/lib/lz4kd/lz4kd_encode_private.h" -o lib/lz4kd/lz4kd_encode_private.h
-          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/include/linux/lz4kd.h" -o include/linux/lz4kd.h
-          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/crypto/lz4kd.c" -o crypto/lz4kd.c
-          # 注册到 crypto/Makefile 与 lib/Makefile（已存在则跳过）
+          for f in Makefile lz4kd_encode.c lz4kd_decode.c lz4kd_private.h lz4kd_encode_private.h; do
+            curl -fsSL "$LZ4KD_URL/lib/lz4kd/$f" -o "lib/lz4kd/$f" || { echo "::error::下载 lib/lz4kd/$f 失败"; exit 1; }
+          done
+          curl -fsSL "$LZ4KD_URL/include/linux/lz4kd.h" -o include/linux/lz4kd.h || { echo "::error::下载 include/linux/lz4kd.h 失败"; exit 1; }
+          curl -fsSL "$LZ4KD_URL/crypto/lz4kd.c" -o crypto/lz4kd.c || { echo "::error::下载 crypto/lz4kd.c 失败"; exit 1; }
+          grep -qm1 '^/\*' crypto/lz4kd.c || { echo "::error::crypto/lz4kd.c 内容异常"; exit 1; }
+          grep -qm1 '^/\*' lib/lz4kd/lz4kd_encode.c || { echo "::error::lib/lz4kd/lz4kd_encode.c 内容异常"; exit 1; }
+
+          # Makefile 注册（重复写入会重复编译，先判断）
           grep -q 'CONFIG_CRYPTO_LZ4KD' crypto/Makefile || echo 'obj-$(CONFIG_CRYPTO_LZ4KD) += lz4kd.o' >> crypto/Makefile
           grep -q 'CONFIG_LZ4KD_COMPRESS' lib/Makefile || echo 'obj-$(CONFIG_LZ4KD_COMPRESS) += lz4kd/' >> lib/Makefile
           grep -q 'CONFIG_LZ4KD_DECOMPRESS' lib/Makefile || echo 'obj-$(CONFIG_LZ4KD_DECOMPRESS) += lz4kd/' >> lib/Makefile
-          # 在 zram 算法列表里注册 lz4kd（直接用 sm8250 的 zcomp.c，含 lz4kd 算法名）
-          curl -LSs "https://raw.githubusercontent.com/liyafe1997/kernel_xiaomi_sm8250_mod/master/drivers/block/zram/zcomp.c" -o drivers/block/zram/zcomp.c
-          # Kconfig 注册（追加到文件末尾，Kconfig 对平铺 config 顺序不敏感）
-          grep -q 'config CRYPTO_LZ4KD' crypto/Kconfig || {
-            echo '' >> crypto/Kconfig
-            echo 'config CRYPTO_LZ4KD' >> crypto/Kconfig
-            echo '	tristate "LZ4KD compression algorithm"' >> crypto/Kconfig
-            echo '	select CRYPTO_ALGAPI' >> crypto/Kconfig
-            echo '	select CRYPTO_ACOMP2' >> crypto/Kconfig
-            echo '	select LZ4KD_COMPRESS' >> crypto/Kconfig
-            echo '	select LZ4KD_DECOMPRESS' >> crypto/Kconfig
-            echo '	help' >> crypto/Kconfig
-            echo '	  This is the LZ4KD algorithm.' >> crypto/Kconfig
-          }
-          grep -q 'config LZ4KD_COMPRESS' lib/Kconfig || {
-            echo '' >> lib/Kconfig
-            echo 'config LZ4KD_COMPRESS' >> lib/Kconfig
-            echo '	tristate' >> lib/Kconfig
-            echo '' >> lib/Kconfig
-            echo 'config LZ4KD_DECOMPRESS' >> lib/Kconfig
-            echo '	tristate' >> lib/Kconfig
-          }
+
+          # Kconfig 注册：crypto/Kconfig 末尾是 "endif # if CRYPTO"，
+          # 直接追加会落到 if CRYPTO 外面，所以插到 config CRYPTO_LZ4HC 之前。
+          if ! grep -q 'config CRYPTO_LZ4KD' crypto/Kconfig; then
+            python3 - <<'PY'
+          p = "crypto/Kconfig"
+          s = open(p, encoding="utf-8").read()
+          block = ("config CRYPTO_LZ4KD\n"
+                   "\ttristate \"LZ4KD compression algorithm\"\n"
+                   "\tselect CRYPTO_ALGAPI\n"
+                   "\tselect LZ4KD_COMPRESS\n"
+                   "\tselect LZ4KD_DECOMPRESS\n"
+                   "\thelp\n"
+                   "\t  This is the LZ4KD algorithm.\n\n")
+          anchor = "config CRYPTO_LZ4HC\n"
+          if anchor not in s:
+              raise SystemExit("crypto/Kconfig: CRYPTO_LZ4HC not found")
+          s = s.replace(anchor, block + anchor, 1)
+          open(p, "w", encoding="utf-8").write(s)
+          print("crypto/Kconfig: CRYPTO_LZ4KD inserted")
+          PY
+          fi
+          if ! grep -q 'config LZ4KD_COMPRESS' lib/Kconfig; then
+            printf 'config LZ4KD_COMPRESS\n\ttristate\n\nconfig LZ4KD_DECOMPRESS\n\ttristate\n' >> lib/Kconfig
+          fi
+
+          # 只给 zram 的 backends[] 增加 lz4kd，保留 OPPO 原本的 THP / hybridswap 实现
+          if ! grep -q '"lz4kd"' drivers/block/zram/zcomp.c; then
+            python3 - <<'PY'
+          p = "drivers/block/zram/zcomp.c"
+          s = open(p, encoding="utf-8").read()
+          anchor = '#if IS_ENABLED(CONFIG_CRYPTO_LZ4HC)\n\t"lz4hc",\n#endif\n'
+          if anchor not in s:
+              raise SystemExit("zcomp.c: lz4hc backend block not found")
+          s = s.replace(anchor, '#if IS_ENABLED(CONFIG_CRYPTO_LZ4KD)\n\t"lz4kd",\n#endif\n' + anchor, 1)
+          open(p, "w", encoding="utf-8").write(s)
+          print("zcomp.c: lz4kd backend registered")
+          PY
+          fi
 
           # 移除内核源码里预装的 KernelSU 引用（本工作流不再内置 root，配合 APatch）
           sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile
@@ -318,6 +347,13 @@ jobs:
           make O=out CC="clang" LLVM=1 olddefconfig
           # 5. 开始编译
           make O=out CC="clang" LLVM=1 -j2
+
+          # ==== 编译后校验 LZ4KD 是否真的进了内核 ====
+          grep -q '^#define CONFIG_CRYPTO_LZ4KD 1' out/include/generated/autoconf.h \
+            || { echo "::error::CONFIG_CRYPTO_LZ4KD 没有生效（被 Kconfig 依赖裁掉）"; grep -n LZ4KD out/.config || true; exit 1; }
+          grep -aq 'lz4kd' out/drivers/block/zram/zcomp.o \
+            || { echo "::error::zcomp.o 里没有 lz4kd 后端字符串"; exit 1; }
+          echo "LZ4KD 已编入内核，刷入后可执行：echo lz4kd > /sys/block/zram0/comp_algorithm"
 
       - name: Package with AnyKernel3
         run: |
