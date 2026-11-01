@@ -109,8 +109,8 @@ jobs:
           done
           curl -fsSL "$LZ4KD_URL/include/linux/lz4kd.h" -o include/linux/lz4kd.h || { echo "::error::下载 include/linux/lz4kd.h 失败"; exit 1; }
           curl -fsSL "$LZ4KD_URL/crypto/lz4kd.c" -o crypto/lz4kd.c || { echo "::error::下载 crypto/lz4kd.c 失败"; exit 1; }
-          head -1 crypto/lz4kd.c | grep -q '^/\*' || { echo "::error::crypto/lz4kd.c 内容异常"; exit 1; }
-          head -1 lib/lz4kd/lz4kd_encode.c | grep -q '^/\*' || { echo "::error::lib/lz4kd/lz4kd_encode.c 内容异常"; exit 1; }
+          grep -qm1 '^/\*' crypto/lz4kd.c || { echo "::error::crypto/lz4kd.c 内容异常"; exit 1; }
+          grep -qm1 '^/\*' lib/lz4kd/lz4kd_encode.c || { echo "::error::lib/lz4kd/lz4kd_encode.c 内容异常"; exit 1; }
 
           # Makefile 注册（重复写入会重复编译，先判断）
           grep -q 'CONFIG_CRYPTO_LZ4KD' crypto/Makefile || echo 'obj-$(CONFIG_CRYPTO_LZ4KD) += lz4kd.o' >> crypto/Makefile
@@ -362,7 +362,7 @@ jobs:
           # ==== 编译后校验 LZ4KD 是否真的进了内核 ====
           grep -q '^#define CONFIG_CRYPTO_LZ4KD 1' out/include/generated/autoconf.h \
             || { echo "::error::CONFIG_CRYPTO_LZ4KD 没有生效（被 Kconfig 依赖裁掉）"; grep -n LZ4KD out/.config || true; exit 1; }
-          strings out/drivers/block/zram/zcomp.o | grep -qx 'lz4kd' \
+          grep -aq 'lz4kd' out/drivers/block/zram/zcomp.o \
             || { echo "::error::zcomp.o 里没有 lz4kd 后端字符串"; exit 1; }
           echo "LZ4KD 已编入内核，刷入后可执行：echo lz4kd > /sys/block/zram0/comp_algorithm"
 
